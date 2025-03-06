@@ -1,231 +1,266 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <openssl/sha.h>  
+#include <conio.h>  // For Windows secure PIN input
 
-void createAccount();
-void depositAmount();
-void withdrawAmount();
-void balanceEnquiry();
+#define MAX_ACCOUNTS 100
+#define MAX_NAME_LEN 50
+#define PIN_LEN 4
+#define HASH_LEN 65  
 
-const char* ACCOUNT_FILE = "account.dat";
+typedef enum { SAVINGS, CURRENT } AccountType;
 
 typedef struct {
+    char name[MAX_NAME_LEN];
     int accountNumber;
-    char name[50];
+    char hashedPIN[HASH_LEN];
     float balance;
-    int pin;
+    AccountType accountType;
+    time_t lastInterestApplied;
 } Account;
 
-int accountExists(int accountNumber) {
-    FILE *file = fopen(ACCOUNT_FILE, "rb");
-    if (!file) return 0;
-    Account acc;
-    while (fread(&acc, sizeof(acc), 1, file)) {
-        if (acc.accountNumber == accountNumber) {
-            fclose(file);
-            return 1;
+Account accounts[MAX_ACCOUNTS];
+int accountCount = 0;
+
+// Function to securely input PIN (Windows)
+void getMaskedPIN(char *pin) {
+    printf("\nEnter your 4-digit PIN: ");
+    
+    for (int i = 0; i < PIN_LEN; i++) {
+        pin[i] = _getch();  // Read without displaying
+        printf("*");        // Show * for each character entered
+    }
+    
+    pin[PIN_LEN] = '\0';  // Null-terminate the string
+    printf("\n");  // Move to new line
+}
+
+// Hashing function for PIN security
+void hashPIN(const char *pin, char *hashedPIN) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256((unsigned char*)pin, strlen(pin), hash);
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(hashedPIN + (i * 2), "%02x", hash[i]);
+    }
+    hashedPIN[64] = '\0';  
+}
+
+// Authenticate user with hashed PIN
+int authenticateUser(int accountIndex) {
+    char pin[PIN_LEN + 1], hashedInput[HASH_LEN];
+
+    getMaskedPIN(pin);
+
+    // Hash input PIN and compare with stored hash
+    hashPIN(pin, hashedInput);
+    if (strcmp(hashedInput, accounts[accountIndex].hashedPIN) == 0) {
+        return 1;
+    } else {
+        printf("\nIncorrect PIN. Access Denied!\n");
+        return 0;
+    }
+}
+
+// Find an account by account number
+int findAccount(int accountNumber) {
+    for (int i = 0; i < accountCount; i++) {
+        if (accounts[i].accountNumber == accountNumber) {
+            return i;
         }
     }
+    return -1;
+}
+
+// Save accounts to file
+void saveAccountsToFile() {
+    FILE *file = fopen("accounts.dat", "wb");
+    if (!file) {
+        printf("\nError saving accounts!\n");
+        return;
+    }
+    fwrite(&accountCount, sizeof(int), 1, file);
+    fwrite(accounts, sizeof(Account), accountCount, file);
     fclose(file);
-    return 0;
 }
 
-int verifyPin(int accountNumber, int pin) {
-    FILE *file = fopen(ACCOUNT_FILE, "rb");
-    if (!file) return 0;
-    Account acc;
-    while (fread(&acc, sizeof(acc), 1, file)) {
-        if (acc.accountNumber == accountNumber && acc.pin == pin) {
-            fclose(file);
-            return 1;
-        }
-    }
+// Load accounts from file
+void loadAccountsFromFile() {
+    FILE *file = fopen("accounts.dat", "rb");
+    if (!file) return;  
+    fread(&accountCount, sizeof(int), 1, file);
+    fread(accounts, sizeof(Account), accountCount, file);
     fclose(file);
-    return 0;
 }
 
-int main() {
-    while (1) {
-        int choice;
-        printf("\n *** Bank Management System *** ");
-        printf("\n 1. Create Account");
-        printf("\n 2. Deposit Amount");
-        printf("\n 3. Withdraw Amount");
-        printf("\n 4. Balance Enquiry");
-        printf("\n 5. Exit");
-        printf("\n Enter your choice: ");
-        scanf("%d", &choice);
-        
-        switch (choice) {
-            case 1:
-                createAccount();
-                break;
-            case 2:
-                depositAmount();
-                break;
-            case 3:
-                withdrawAmount();
-                break;
-            case 4:
-                balanceEnquiry();
-                break;
-            case 5:
-                printf("\n Thank you for using our banking system. Goodbye!");
-                return 0;
-            default:
-                printf("\n Invalid choice");
+// Function to check if the name is already in use
+int isNameTaken(const char *name) {
+    for (int i = 0; i < accountCount; i++) {
+        if (strcmp(accounts[i].name, name) == 0) {
+            return 1; // Name already exists
         }
     }
+    return 0; // Name is unique
 }
 
+// Create a new bank account with a unique name
 void createAccount() {
-    Account acc;
-    FILE *file = fopen(ACCOUNT_FILE, "ab+");
-    if (!file) {
-        printf("\n Error opening file");
+    if (accountCount >= MAX_ACCOUNTS) {
+        printf("\nMaximum account limit reached.\n");
         return;
     }
-    
-    printf("\n Enter Your Name: ");
+
+    Account newAccount;
     getchar();
-    fgets(acc.name, sizeof(acc.name), stdin);
-    acc.name[strcspn(acc.name, "\n")] = '\0';
-    
+
+    // Check for unique name
     do {
-        printf("\n Enter Your Account Number: ");
-        scanf("%d", &acc.accountNumber);
-        if (acc.accountNumber <= 0) {
-            printf("\n Invalid account number. Please enter a positive integer.");
-        } else if (accountExists(acc.accountNumber)) {
-            printf("\n Account number already exists. Please choose another.");
+        printf("\nEnter Your Name: ");
+        fgets(newAccount.name, MAX_NAME_LEN, stdin);
+        newAccount.name[strcspn(newAccount.name, "\n")] = '\0'; // Remove newline character
+
+        if (isNameTaken(newAccount.name)) {
+            printf("\nThis name is already registered! Please use a different name.\n");
         }
-    } while (acc.accountNumber <= 0 || accountExists(acc.accountNumber));
-    
-    printf("\n Set a 4-digit PIN for authentication: ");
-    scanf("%d", &acc.pin);
-    
-    acc.balance = 0;
-    fwrite(&acc, sizeof(acc), 1, file);
-    fclose(file);
-    printf("\n Account created successfully!");
+    } while (isNameTaken(newAccount.name));
+
+    // Ensure unique account number
+    do {
+        printf("\nEnter a Unique Account Number: ");
+        scanf("%d", &newAccount.accountNumber);
+        if (newAccount.accountNumber <= 0) {
+            printf("\nInvalid Account Number! Must be positive.\n");
+        }
+        if (findAccount(newAccount.accountNumber) != -1) {
+            printf("\nAccount number already exists. Choose another.\n");
+        }
+    } while (newAccount.accountNumber <= 0 || findAccount(newAccount.accountNumber) != -1);
+
+    // Securely input and hash the PIN
+    char pin[PIN_LEN + 1];
+    do {
+        getMaskedPIN(pin);
+    } while (strlen(pin) != PIN_LEN);
+
+    hashPIN(pin, newAccount.hashedPIN);
+
+    printf("\nSelect Account Type (0 = SAVINGS, 1 = CURRENT): ");
+    scanf("%d", (int*)&newAccount.accountType);
+
+    newAccount.balance = 0;
+    newAccount.lastInterestApplied = time(NULL);
+
+    // Store the new account
+    accounts[accountCount++] = newAccount;
+    saveAccountsToFile();
+
+    printf("\nAccount Created Successfully!\n");
 }
 
+
+// Deposit money into an account
 void depositAmount() {
-    FILE *file = fopen(ACCOUNT_FILE, "rb+");
-    if (!file) {
-        printf("\n Error opening file");
+    int accountNumber, index;
+    float amount;
+    printf("\nEnter Account Number: ");
+    scanf("%d", &accountNumber);
+    index = findAccount(accountNumber);
+    if (index == -1) {
+        printf("\nAccount Not Found!\n");
         return;
     }
-    
-    int accountNumber;
-    float amount;
-    Account acc;
-    
-    printf("\n Enter Your Account Number: ");
-    scanf("%d", &accountNumber);
-    
-    printf("\n Enter the amount to deposit: ");
+    printf("\nEnter Amount to Deposit: ");
     scanf("%f", &amount);
     if (amount <= 0) {
-        printf("\n Invalid amount. Please enter a positive value.");
-        fclose(file);
+        printf("\nInvalid Amount!\n");
         return;
     }
-    
-    while (fread(&acc, sizeof(acc), 1, file)) {
-        if (acc.accountNumber == accountNumber) {
-            acc.balance += amount;
-            fseek(file, -(long)sizeof(acc), SEEK_CUR);
-            fwrite(&acc, sizeof(acc), 1, file);
-            fclose(file);
-            printf("\n Successfully deposited Rs: %.2f", amount);
-            printf("\n Updated Balance: Rs: %.2f\n", acc.balance);
-            return;
-        }
-    }
-    
-    fclose(file);
-    printf("\n Account No: %d does not exist.", accountNumber);
+    accounts[index].balance += amount;
+    saveAccountsToFile();
+    printf("\nDeposit Successful! New Balance: Rs %.2f\n", accounts[index].balance);
 }
 
+// Withdraw money from an account
 void withdrawAmount() {
-    FILE *file = fopen(ACCOUNT_FILE, "rb+");
-    if (!file) {
-        printf("\n Error opening file");
-        return;
-    }
-    
-    int accountNumber, pin;
+    int accountNumber, index;
     float amount;
-    Account acc;
-    
-    printf("\n Enter Your Account Number: ");
+    printf("\nEnter Account Number: ");
     scanf("%d", &accountNumber);
-    printf("\n Enter Your PIN: ");
-    scanf("%d", &pin);
-    
-    if (!verifyPin(accountNumber, pin)) {
-        printf("\n Incorrect PIN. Transaction failed.");
-        fclose(file);
+    index = findAccount(accountNumber);
+    if (index == -1 || !authenticateUser(index)) {
         return;
     }
-    
-    printf("\n Enter the amount to withdraw: ");
+    printf("\nEnter Amount to Withdraw: ");
     scanf("%f", &amount);
-    if (amount <= 0) {
-        printf("\n Invalid amount. Please enter a positive value.");
-        fclose(file);
+    if (amount <= 0 || amount > accounts[index].balance) {
+        printf("\nInvalid or Insufficient Funds!\n");
         return;
     }
-    
-    while (fread(&acc, sizeof(acc), 1, file)) {
-        if (acc.accountNumber == accountNumber) {
-            if (acc.balance >= amount) {
-                acc.balance -= amount;
-                fseek(file, -(long)sizeof(acc), SEEK_CUR);
-                fwrite(&acc, sizeof(acc), 1, file);
-                fclose(file);
-                printf("\n Successfully withdrawn Rs: %.2f", amount);
-                printf("\n Updated Balance: Rs: %.2f\n", acc.balance);
-                return;
-            } else {
-                printf("\n Insufficient balance");
-                fclose(file);
-                return;
-            }
-        }
-    }
-    fclose(file);
-    printf("\n Account No: %d does not exist.", accountNumber);
+    accounts[index].balance -= amount;
+    saveAccountsToFile();
+    printf("\nWithdrawal Successful! New Balance: Rs %.2f\n", accounts[index].balance);
 }
 
+// Balance enquiry for an account
 void balanceEnquiry() {
-    FILE *file = fopen(ACCOUNT_FILE, "rb");
-    if (!file) {
-        printf("\n Error opening file");
-        return;
-    }
-    
-    int accountNumber, pin;
-    Account acc;
-    
-    printf("\n Enter Your Account Number: ");
+    int accountNumber, index;
+    printf("\nEnter Account Number: ");
     scanf("%d", &accountNumber);
-    printf("\n Enter Your PIN: ");
-    scanf("%d", &pin);
-    
-    if (!verifyPin(accountNumber, pin)) {
-        printf("\n Incorrect PIN.");
-        fclose(file);
+    index = findAccount(accountNumber);
+    if (index == -1 || !authenticateUser(index)) {
         return;
     }
-    
-    while (fread(&acc, sizeof(acc), 1, file)) {
-        if (acc.accountNumber == accountNumber) {
-            printf("\n Your Account Balance is: Rs: %.2f", acc.balance);
-            fclose(file);
-            return;
-        }
+    printf("\nAccount Balance: Rs %.2f\n", accounts[index].balance);
+}
+
+// Delete an account
+void deleteAccount() {
+    int accountNumber, index;
+    printf("\nEnter Account Number to Delete: ");
+    scanf("%d", &accountNumber);
+    index = findAccount(accountNumber);
+    if (index == -1 || !authenticateUser(index)) {
+        return;
     }
-    fclose(file);
-    printf("\n Account No: %d not found", accountNumber);
+
+    for (int i = index; i < accountCount - 1; i++) {
+        accounts[i] = accounts[i + 1];
+    }
+    accountCount--;
+    saveAccountsToFile();
+    printf("\nYour account has been successfully closed. We appreciate your trust and hope to serve you again in the future!\n");
+}
+
+// Display menu and handle user input
+void menu() {
+    int choice;
+    do {
+        printf("\n===== Bank Management System =====\n");
+        printf("1. Create Account\n");
+        printf("2. Deposit Money\n");
+        printf("3. Withdraw Money\n");
+        printf("4. Balance Enquiry\n");
+        printf("5. Delete Account\n");
+        printf("6. Exit\n");
+        printf("Enter Your Choice: ");
+        scanf("%d", &choice);
+
+        switch (choice) {
+            case 1: createAccount(); break;
+            case 2: depositAmount(); break;
+            case 3: withdrawAmount(); break;
+            case 4: balanceEnquiry(); break;
+            case 5: deleteAccount(); break;
+            case 6: printf("\nThank you for using our bank system!\n"); break;
+            default: printf("\nInvalid Choice! Try again.\n");
+        }
+    } while (choice != 6);
+}
+
+// Main function
+int main() {
+    loadAccountsFromFile();
+    menu();
+    return 0;
 }
