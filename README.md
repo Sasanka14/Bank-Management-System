@@ -72,4 +72,3 @@ gcc bank.c -o bank.exe -lssl -lcrypto
 💡 **Sasanka Sekhar Kundu** – *Developer*  
 🌐 GitHub: **[Your GitHub Profile](https://github.com/Sasanka14)**  
 📧 Email: **sasankasekharkundu24@gmail.com**  
-```
